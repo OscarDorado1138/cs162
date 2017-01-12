@@ -6,6 +6,9 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <errno.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 struct tokens {
   size_t tokens_length;
@@ -165,21 +168,37 @@ char * resolve_path(char *command){
     
 
 void tokens_run_command(struct tokens *tokens){
-    char *cmd = tokens->tokens[0];
-    char **argv = tokens->tokens;
+    int fd, i;
+    char **args = tokens->tokens;
 
-    if(access(cmd, F_OK) != -1){
+    for(i=0;args[i];i++){
+        if(strcmp(args[i], "<") == 0){
+            fd = open(args[i+1], O_RDONLY);
+            dup2(fd, STDIN_FILENO);
+            args[i] = NULL;
+            break;
+        }
+        else if(strcmp(args[i], ">") == 0){
+            printf("REDIRECTING\n");
+            fd = open(args[i+1], O_RDWR | O_CREAT | O_TRUNC, S_IRWXU);
+            dup2(fd, STDOUT_FILENO);
+            args[i] = NULL;
+            break;
+        }
+    }
+    
+    if(access(args[0], F_OK) != -1){
         // File exists
-        execv(cmd, argv);
+        execv(args[0], args); 
     }
     else{
-        char *cmd_path = resolve_path(cmd);
+        char *cmd_path = resolve_path(args[0]);
         if(cmd_path == NULL){
             printf("execv failed error %d %s\n",errno,strerror(errno));
             exit(-1);
         }
         else{
-            execv(cmd_path, argv);
+            execv(cmd_path, args);
         }
     }
 }
