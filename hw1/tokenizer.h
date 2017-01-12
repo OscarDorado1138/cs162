@@ -14,3 +14,6 @@ char *tokens_get_token(struct tokens *tokens, size_t n);
 
 /* Free the memory */
 void tokens_destroy(struct tokens *tokens);
+
+/* Run the command given by a bunch of tokens */
+void tokens_run_command(struct tokens *tokens);

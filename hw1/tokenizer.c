@@ -2,6 +2,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include "tokenizer.h"
+#include <sys/wait.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <errno.h>
 
 struct tokens {
   size_t tokens_length;
@@ -124,4 +128,58 @@ void tokens_destroy(struct tokens *tokens) {
     free(tokens->buffers[i]);
   }
   free(tokens);
+}
+
+char * resolve_path(char *command){
+    char *env_path = getenv("PATH");
+    char *pathcpy = (char *)malloc(sizeof(char) * strlen(env_path));
+    char *path, *cmd;
+    int count=0, i;
+
+    strcpy(pathcpy, env_path);
+    for (i=0; pathcpy[i]; i++){
+        if(pathcpy[i] == ':'){
+            ++count;
+        }
+    }
+    
+    path = strtok(pathcpy, ":");
+    cmd = (char *)malloc(sizeof(char) * 1024);
+
+    while(path != NULL){
+        path = strtok(NULL, ":");
+
+        cmd[0] = '\0';
+        strcpy(cmd, path);
+        strcat(cmd, "/");
+        strcat(cmd, command);
+
+        if(access(cmd, F_OK) != -1){
+            return cmd;
+        }
+    }
+    free(pathcpy);
+    free(cmd);
+    return NULL;
+}
+    
+
+void tokens_run_command(struct tokens *tokens){
+    char *cmd = tokens->tokens[0];
+    char **argv = tokens->tokens;
+
+    if(access(cmd, F_OK) != -1){
+        // File exists
+        execv(cmd, argv);
+    }
+    else{
+        char *cmd_path = resolve_path(cmd);
+        if(cmd_path == NULL){
+            printf("execv failed error %d %s\n",errno,strerror(errno));
+            exit(-1);
+        }
+        else{
+            execv(cmd_path, argv);
+        }
+    }
 }

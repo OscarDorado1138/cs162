@@ -127,8 +127,16 @@ int main(unused int argc, unused char *argv[]) {
     if (fundex >= 0) {
       cmd_table[fundex].fun(tokens);
     } else {
-      /* REPLACE this to run commands as programs. */
-      fprintf(stdout, "This shell doesn't know how to run programs.\n");
+      int pid = fork();
+      if(pid == 0){
+        tokens_run_command(tokens);
+        printf("execv failed with error %d %s\n",errno,strerror(errno));
+        exit(-1);
+      }
+      else{
+          int status;
+          wait(&status);
+      }
     }
 
     if (shell_is_interactive)
