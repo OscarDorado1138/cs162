@@ -319,6 +319,7 @@ int main(int argc, char **argv) {
                 "                      \"--proxy [HOSTNAME:PORT]\"\n");
         exit_with_usage();
     }
+    printf("Hello !");
 
     serve_forever(&server_fd, request_handler);
 
