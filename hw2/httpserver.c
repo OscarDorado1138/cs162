@@ -45,41 +45,35 @@ void send404(int fd, char *filename){
     http_send_string(fd,
             " not found</p>"
             "</center>");
-    printf("Served 404 for %s\n", filename);
 }
 
 void serve_file(int fd, char *filename){
     int length;
-    char *buffer;
-    FILE *fp;
+    char buffer[1096];
+    int fp;
 
-    if((fp = fopen(filename, "r"))){
-        fseek(fp, 0, SEEK_END);
-        length = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        buffer = (char *)malloc(sizeof(char) * length);
-        fread(buffer, 1, length, fp);
-        fclose(fp);
-
-        buffer[length] = '\0';
-
+    fp = open(filename, O_RDONLY);
+    if(fp == -1){
+        printf("Couldn't find file. Serving 404\n");
+        send404(fd, filename);
+    }
+    else{
         http_start_response(fd, 200);
         http_send_header(fd, "Content-Type", http_get_mime_type(filename));
         http_send_header(fd, "Server", "httpserver/1.0");
         http_end_headers(fd);
 
-        http_send_string(fd, buffer);
-        free(buffer);
-    }
-    else{
-        send404(fd, filename);
+        while((length = read(fp, buffer, 1096)) > 0){
+            http_send_data(fd, buffer, length);
+        }
     }
 }
 
 void serve_directory_listing(int fd, char *dirname){
     struct dirent *ent;
     DIR *dir = opendir(dirname);
-
+    char filename[1024];
+    
     if(!dir){
         send404(fd, dirname);
         return;
@@ -91,17 +85,24 @@ void serve_directory_listing(int fd, char *dirname){
     http_end_headers(fd);
 
     http_send_string(fd,
-            "<center>"
             "<h1>Welcome to httpserver!</h1>"
             "<hr>"
             );
 
     while((ent = readdir(dir)) != NULL){
+        // filename[0] = '\0';
+        // strcat(filename, dirname);
+        // strcat(filename, ent->d_name);
+
+        http_send_string(fd, "<a href=\"");
         http_send_string(fd, ent->d_name);
-        http_send_string(fd, "<br/>");
+        http_send_string(fd, "\">");
+
+        http_send_string(fd, ent->d_name);
+        http_send_string(fd, "</a>");
+        http_send_string(fd, "<br/>\n");
     }
 
-    http_send_string(fd, "</center>");
     closedir(dir);
 }
 
@@ -124,37 +125,44 @@ void handle_files_request(int fd) {
     struct stat file_info;
 
     struct http_request *request = http_request_parse(fd);
-    char filename[1024];
-    filename[0] = '\0';
+    char path[1024];
 
-    strcat(filename, server_files_directory);
-    strcat(filename, request->path);
+    if(request == NULL || request->path == NULL){
+        // printf("Wierd Null pointer here\n");
+        return;
+    }
 
-    printf("Handling Files request for %s\n", filename);
-    stat(filename, &file_info);
+    // Favicon.ico
+    if(strcmp(request->path, "/favicon.ico") == 0){
+        send404(fd, request->path);
+        return;
+    }
+    strcpy(path, server_files_directory);
+    strcat(path, request->path);
+
+    // printf("Handling Files request for %s\n", request->path);
+    stat(path, &file_info);
 
     if(S_ISDIR(file_info.st_mode)){
         char index_name[1024];
-        index_name[0] = '\0';
-
-        strcat(index_name, filename);
+        strcpy(index_name, path);
         strcat(index_name, "/index.html");
 
         if(access(index_name, F_OK) == 0){
-            printf("Serving index file %s\n", index_name);
+            // printf("Serving index file %s\n", index_name);
             serve_file(fd, index_name);
         }
         else{
-            printf("Serving directory listing %s\n", filename);
-            serve_directory_listing(fd, filename);
+            // printf("Index not found. Serving directory listing %s\n", path);
+            serve_directory_listing(fd, path);
         }
     }
     else if(S_ISREG(file_info.st_mode)){
-        printf("Serving file %s\n", filename);
-        serve_file(fd, filename);
+        // printf("Serving file %s\n", path);
+        serve_file(fd, path);
     }
     else{
-        send404(fd, filename);
+        send404(fd, path);
     }
 }
 
@@ -176,6 +184,8 @@ void handle_proxy_request(int fd) {
      * TODO: Your solution for Task 3 goes here! Feel free to delete/modify *
      * any existing code.
      */
+    
+
 
 }
 
@@ -319,7 +329,6 @@ int main(int argc, char **argv) {
                 "                      \"--proxy [HOSTNAME:PORT]\"\n");
         exit_with_usage();
     }
-    printf("Hello !");
 
     serve_forever(&server_fd, request_handler);
 
