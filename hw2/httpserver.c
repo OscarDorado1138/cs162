@@ -72,7 +72,6 @@ void serve_file(int fd, char *filename){
 void serve_directory_listing(int fd, char *dirname){
     struct dirent *ent;
     DIR *dir = opendir(dirname);
-    char filename[1024];
     
     if(!dir){
         send404(fd, dirname);
@@ -90,10 +89,6 @@ void serve_directory_listing(int fd, char *dirname){
             );
 
     while((ent = readdir(dir)) != NULL){
-        // filename[0] = '\0';
-        // strcat(filename, dirname);
-        // strcat(filename, ent->d_name);
-
         http_send_string(fd, "<a href=\"");
         http_send_string(fd, ent->d_name);
         http_send_string(fd, "\">");
@@ -127,6 +122,8 @@ void handle_files_request(int fd) {
     struct http_request *request = http_request_parse(fd);
     char path[1024];
 
+
+    printf("Thread %d serving request on %d for %s\n",(int) pthread_self(), fd, request->path);
     if(request == NULL || request->path == NULL){
         // printf("Wierd Null pointer here\n");
         return;
@@ -184,9 +181,23 @@ void handle_proxy_request(int fd) {
      * TODO: Your solution for Task 3 goes here! Feel free to delete/modify *
      * any existing code.
      */
-    
 
 
+
+}
+
+void * thread_loop(void *f){
+    void (*request_handler)(int) = f;
+    int client_fd;
+    printf("Thread created !!!\n");
+
+    while(1){
+        client_fd = wq_pop(&work_queue);
+        request_handler(client_fd);
+        close(client_fd);
+    }
+
+    return NULL;
 }
 
 
@@ -243,8 +254,10 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
 
         // printf("Accepted connection from %s on port %d\n", inet_ntoa(client_address.sin_addr), client_address.sin_port);
 
-        request_handler(client_socket_number);
-        close(client_socket_number);
+        // Instead of this, push into queue
+        // request_handler(client_socket_number);
+        // close(client_socket_number);
+        wq_push(&work_queue, client_socket_number);
     }
 
     shutdown(*socket_number, SHUT_RDWR);
@@ -276,6 +289,10 @@ int main(int argc, char **argv) {
     void (*request_handler)(int) = NULL;
 
     int i;
+
+    // Initialize wq
+    wq_init(&work_queue);
+
     for (i = 1; i < argc; i++) {
         if (strcmp("--files", argv[i]) == 0) {
             request_handler = handle_files_request;
@@ -312,10 +329,21 @@ int main(int argc, char **argv) {
             server_port = atoi(server_port_string);
         } else if (strcmp("--num-threads", argv[i]) == 0) {
             char *num_threads_str = argv[++i];
+            pthread_t thread;
+            int i;
+
             if (!num_threads_str || (num_threads = atoi(num_threads_str)) < 1) {
                 fprintf(stderr, "Expected positive integer after --num-threads\n");
                 exit_with_usage();
             }
+
+            // Initialize num threads
+            for(i=1;i<=num_threads;i++){
+                if(pthread_create(&thread, NULL, thread_loop, request_handler) != 0){
+                    fprintf(stderr, "Couldn't initialize thread %d, Error", i);
+                }
+            }
+
         } else if (strcmp("--help", argv[i]) == 0) {
             exit_with_usage();
         } else {
