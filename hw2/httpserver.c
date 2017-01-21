@@ -14,6 +14,8 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <unistd.h>
+#include <errno.h>
+#include <string.h>
 
 #include "libhttp.h"
 #include "wq.h"
@@ -29,7 +31,11 @@ int num_threads;
 int server_port;
 char *server_files_directory;
 char *server_proxy_hostname;
+char server_proxy_ip[16];
 int server_proxy_port;
+
+
+void *relay_thread_loop(void *input);
 
 void send404(int fd, char *filename){
     http_start_response(fd, 200);
@@ -122,8 +128,6 @@ void handle_files_request(int fd) {
     struct http_request *request = http_request_parse(fd);
     char path[1024];
 
-
-    printf("Thread %d serving request on %d for %s\n",(int) pthread_self(), fd, request->path);
     if(request == NULL || request->path == NULL){
         // printf("Wierd Null pointer here\n");
         return;
@@ -181,20 +185,63 @@ void handle_proxy_request(int fd) {
      * TODO: Your solution for Task 3 goes here! Feel free to delete/modify *
      * any existing code.
      */
+    pthread_t forward_relay;
+    pthread_t backward_relay;
+    
+    int forward_args[2];
+    int backward_args[2];
 
+    int proxy_socket = socket(PF_INET, SOCK_STREAM, 0);
+    struct sockaddr_in proxy_addr;
 
+    memset(&proxy_addr, 0, sizeof(proxy_addr));
 
+    proxy_addr.sin_family = AF_INET;
+    inet_pton(AF_INET, server_proxy_ip, &proxy_addr.sin_addr);
+    proxy_addr.sin_port = htons(server_proxy_port);
+
+    if(connect(proxy_socket, (struct sockaddr *)&proxy_addr, sizeof(proxy_addr)) < 0){
+        printf("Connection failed! %s\n", strerror(errno));
+    }
+
+    forward_args[0] = fd;
+    forward_args[1] = proxy_socket;
+
+    backward_args[0] = proxy_socket;
+    backward_args[1] = fd;
+
+    pthread_create(&forward_relay, NULL, relay_thread_loop, (void *)forward_args);
+    pthread_create(&backward_relay, NULL, relay_thread_loop, (void *)backward_args);
+
+    pthread_join(forward_relay, NULL);
+}
+
+void *relay_thread_loop(void *input){
+    int *fds = (int *)input;
+    int in = fds[0];
+    int out = fds[1];
+    char buffer[1024];
+    int length;
+
+    while((length = read(in, buffer, sizeof(buffer) - 1)) > 0){
+        printf("%d to %d\n", in, out);
+        printf("%s\n\n\n", buffer);
+        write(out, buffer, length);
+    }
+    return NULL;
 }
 
 void * thread_loop(void *f){
     void (*request_handler)(int) = f;
     int client_fd;
-    printf("Thread created !!!\n");
+    printf("Thread created\n");
 
     while(1){
         client_fd = wq_pop(&work_queue);
         request_handler(client_fd);
+        printf("I'm back %lu!\n", (unsigned long)pthread_self());
         close(client_fd);
+        printf("closed fd %d\n", client_fd);
     }
 
     return NULL;
@@ -257,7 +304,13 @@ void serve_forever(int *socket_number, void (*request_handler)(int)) {
         // Instead of this, push into queue
         // request_handler(client_socket_number);
         // close(client_socket_number);
-        wq_push(&work_queue, client_socket_number);
+        if(0 < num_threads){
+            wq_push(&work_queue, client_socket_number);
+        }
+        else{
+            request_handler(client_socket_number);
+            close(client_socket_number);
+        }
     }
 
     shutdown(*socket_number, SHUT_RDWR);
@@ -320,6 +373,13 @@ int main(int argc, char **argv) {
                 server_proxy_hostname = proxy_target;
                 server_proxy_port = 80;
             }
+            inet_ntop(
+                AF_INET,
+                gethostbyname(server_proxy_hostname)->h_addr,
+                server_proxy_ip,
+                16
+            );
+
         } else if (strcmp("--port", argv[i]) == 0) {
             char *server_port_string = argv[++i];
             if (!server_port_string) {
